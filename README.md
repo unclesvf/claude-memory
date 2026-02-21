@@ -8,6 +8,7 @@ Layered memory system for Claude Code — keyword index, topic files, and hooks 
 2. **Topic files** (`*.md`) — Full project details, loaded on demand only when keywords match.
 3. **Search hook** (`hooks/memory_search.py`) — Runs on every prompt submission. Matches your message against the keyword index and injects matching topic file contents into Claude's context.
 4. **PreCompact hook** (`hooks/precompact_save.py`) — Runs before context compression. Saves a session snapshot (what you were working on, files touched, recent actions) so the next session can pick up where you left off.
+5. **SessionStart hook** (`hooks/session_start.py`) — Runs when a new session begins. Automatically injects the recovery snapshot from PreCompact so Claude knows what you were working on without being asked.
 
 ## Setup
 
@@ -131,7 +132,68 @@ The hook writes two files:
 - `~/.claude/sessions/last_session.md` — Human-readable snapshot of what was being worked on
 - `~/.claude/sessions/compaction_log.jsonl` — Append-only log of all compaction events
 
-### 5. Approve the hooks
+### 5. Add the SessionStart hook (optional, pairs with PreCompact)
+
+The SessionStart hook automatically injects the PreCompact recovery file when a new session starts or after compaction. This means Claude will know what you were working on without you having to tell it.
+
+Copy the hook:
+
+**macOS:**
+```bash
+cp hooks/session_start.py "$HOME/.claude/hooks/"
+chmod +x "$HOME/.claude/hooks/session_start.py"
+```
+
+**Windows:**
+```powershell
+Copy-Item hooks\session_start.py "$env:USERPROFILE\.claude\hooks\"
+```
+
+Add SessionStart to your `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/.claude/hooks/memory_search.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/.claude/hooks/precompact_save.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/.claude/hooks/session_start.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The SessionStart hook only fires on `startup` and `compact` sources — it stays silent on `/clear` (user wants a fresh start) and `resume` (context already available). Recovery files older than 1 hour are ignored.
+
+### 6. Approve the hooks
 
 On first launch after adding hooks, Claude Code will prompt you to review and approve them in the `/hooks` menu. This is a security measure — hooks added by editing files manually require approval before they'll run.
 
