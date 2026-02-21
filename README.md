@@ -205,7 +205,29 @@ Add a line to the Project Index section of `MEMORY.md`:
 **Project Name** | Status | keyword1 keyword2 keyword3 | [topic-file.md](topic-file.md)
 ```
 
+Or with an importance score (1-10, default 5):
+
+```markdown
+**Project Name** | Status | 8 | keyword1 keyword2 keyword3 | [topic-file.md](topic-file.md)
+```
+
+Importance affects how strongly keyword matches rank this entry. A score of 5 is neutral, 10 doubles the keyword weight, and 1 reduces it to 20%.
+
 Then create the corresponding topic file with full details. The hook will automatically match future prompts against the keywords and load the topic file when relevant.
+
+## Scoring System
+
+The search hook ranks memories using three signals:
+
+1. **Keyword match** (0-15+) — Exact keyword match = 3 points, partial match = 2, project name match = 2
+2. **Importance weight** (1-10) — Multiplier on keyword score. Default 5 = neutral (1.0x). Set per entry in MEMORY.md.
+3. **Recency boost** — Files accessed in the last hour get +3, last 4 hours +2, last 24 hours +1
+
+Formula: `final_score = keyword_score * (importance / 5) + recency_boost`
+
+Minimum threshold to surface a topic file: **4 points**. Top 3 results are returned.
+
+Access times are tracked in `~/.claude/memory_access_log.json` automatically.
 
 ## Common Pitfalls
 
