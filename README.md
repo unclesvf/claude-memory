@@ -1,12 +1,13 @@
 # claude-memory
 
-Layered memory system for Claude Code — keyword index, topic files, and a search hook that automatically surfaces relevant context.
+Layered memory system for Claude Code — keyword index, topic files, and hooks that automatically surface relevant context and preserve session state across crashes.
 
 ## How It Works
 
 1. **MEMORY.md** — Slim keyword index (~60 lines), always loaded into Claude's context. Each project gets one line with name, status, keywords, and a link to its topic file.
 2. **Topic files** (`*.md`) — Full project details, loaded on demand only when keywords match.
 3. **Search hook** (`hooks/memory_search.py`) — Runs on every prompt submission. Matches your message against the keyword index and injects matching topic file contents into Claude's context.
+4. **PreCompact hook** (`hooks/precompact_save.py`) — Runs before context compression. Saves a session snapshot (what you were working on, files touched, recent actions) so the next session can pick up where you left off.
 
 ## Setup
 
@@ -78,9 +79,61 @@ Add this to `~/.claude/settings.json`. The hook schema requires a nested structu
 "command": "python3 C:\\Users\\scott\\.claude\\hooks\\memory_search.py"
 ```
 
-### 4. Approve the hook
+### 4. Add the PreCompact hook (optional but recommended)
 
-On first launch after adding the hook, Claude Code will prompt you to review and approve it in the `/hooks` menu. This is a security measure — hooks added by editing files manually require approval before they'll run.
+The PreCompact hook saves a session snapshot before Claude compresses context. This means after a crash, power outage, or long session that hits the context limit, the next session can read `~/.claude/sessions/last_session.md` and know exactly what you were working on.
+
+Copy the hook:
+
+**macOS:**
+```bash
+cp hooks/precompact_save.py "$HOME/.claude/hooks/"
+chmod +x "$HOME/.claude/hooks/precompact_save.py"
+```
+
+**Windows:**
+```powershell
+Copy-Item hooks\precompact_save.py "$env:USERPROFILE\.claude\hooks\"
+```
+
+Add the PreCompact event to your `~/.claude/settings.json` alongside the UserPromptSubmit hook:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/.claude/hooks/memory_search.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/.claude/hooks/precompact_save.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook writes two files:
+- `~/.claude/sessions/last_session.md` — Human-readable snapshot of what was being worked on
+- `~/.claude/sessions/compaction_log.jsonl` — Append-only log of all compaction events
+
+### 5. Approve the hooks
+
+On first launch after adding hooks, Claude Code will prompt you to review and approve them in the `/hooks` menu. This is a security measure — hooks added by editing files manually require approval before they'll run.
 
 ## Adding New Projects
 
