@@ -59,7 +59,9 @@ def main():
 
     # Output as additional context for Claude
     # Plain text to stdout gets injected into Claude's context
-    print(f"[Session Recovery] Previous session state recovered:\n\n{content}")
+    output = f"[Session Recovery] Previous session state recovered:\n\n{content}"
+    sys.stdout.buffer.write(output.encode("utf-8", errors="replace"))
+    sys.stdout.buffer.write(b"\n")
 
     sys.exit(0)
 
