@@ -25,7 +25,7 @@ import re
 import time
 from pathlib import Path
 
-MEMORY_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects", "C--Users-scott", "memory")
+MEMORY_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects", "C--Users-yourname", "memory")
 MEMORY_INDEX = os.path.join(MEMORY_DIR, "MEMORY.md")
 RESULT_FILE = os.path.join(os.path.expanduser("~"), ".claude", "memory_search_result.txt")
 ACCESS_LOG = os.path.join(os.path.expanduser("~"), ".claude", "memory_access_log.json")
@@ -37,6 +37,12 @@ JSON_MEMORIES_INDEX = os.path.join(os.path.expanduser("~"), ".claude", "memories
 # Only surface these categories (most actionable for retrieval)
 JSON_SEARCH_CATEGORIES = {"constraint", "decision"}
 # Search all entries (no time limit — older constraints/decisions remain relevant)
+
+# MemPalace fallback config
+PALACE_PATH = os.path.join(os.path.expanduser("~"), ".mempalace", "palace")
+PALACE_COLLECTION = "mempalace_drawers"
+MEMPALACE_FALLBACK_THRESHOLD = 6  # Fall back to MemPalace when best keyword score < this
+MEMPALACE_MIN_SIMILARITY = 0.25   # Minimum ChromaDB similarity score to surface
 
 # Attention decay rate per search invocation (15%)
 DECAY_RATE = 0.15
@@ -340,6 +346,56 @@ def search_json_memories(words, max_results=2):
     return deduped
 
 
+def mempalace_semantic_search(query, limit=3):
+    """Fallback: semantic search via MemPalace ChromaDB when keyword scoring is weak.
+
+    Returns list of (score, source_file, wing, room, content_preview) tuples.
+    """
+    try:
+        import chromadb
+        client = chromadb.PersistentClient(path=PALACE_PATH)
+        col = client.get_collection(PALACE_COLLECTION)
+        results = col.query(
+            query_texts=[query],
+            n_results=limit * 2,  # Over-fetch to filter
+            include=["metadatas", "documents", "distances"],
+        )
+    except Exception:
+        return []
+
+    hits = []
+    seen_files = set()
+    ids = results.get("ids", [[]])[0]
+    docs = results.get("documents", [[]])[0]
+    metas = results.get("metadatas", [[]])[0]
+    distances = results.get("distances", [[]])[0]
+
+    for i, (doc, meta, dist) in enumerate(zip(docs, metas, distances)):
+        # ChromaDB returns L2 distance; convert to similarity (lower distance = better)
+        # Typical range: 0.0 (identical) to 2.0 (very different)
+        similarity = max(0, 1.0 - dist / 2.0)
+        if similarity < MEMPALACE_MIN_SIMILARITY:
+            continue
+
+        source_file = meta.get("source_file", "")
+        wing = meta.get("wing", "")
+        room = meta.get("room", "")
+
+        # Deduplicate by source file (take best chunk per file)
+        if source_file in seen_files:
+            continue
+        seen_files.add(source_file)
+
+        # Preview: first 300 chars of the chunk
+        preview = doc[:300] if doc else ""
+        hits.append((similarity, source_file, wing, room, preview))
+
+        if len(hits) >= limit:
+            break
+
+    return hits
+
+
 def main():
     # Clear previous results
     try:
@@ -373,6 +429,19 @@ def main():
     # Also add hyphenated compounds from the original prompt (e.g., "x-research", "pipeline-consolidation")
     compounds = set(re.findall(r"[a-z0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*", prompt.lower()))
     words.update(compounds)
+
+    # URL pattern detection — inject domain-specific keywords so memory matches reliably
+    # This ensures that e.g. an x.com URL always surfaces x-research-setup.md
+    URL_KEYWORD_MAP = {
+        r"x\.com/|twitter\.com/": {"x-research", "twitter", "tweet", "bookmarks"},
+        r"github\.com/": {"github", "repo", "pull", "issue"},
+        r"reddit\.com/": {"reddit", "research"},
+    }
+    prompt_lower = prompt.lower()
+    for url_pattern, inject_kw in URL_KEYWORD_MAP.items():
+        if re.search(url_pattern, prompt_lower):
+            words.update(inject_kw)
+
     if not words:
         sys.exit(0)
 
@@ -401,12 +470,19 @@ def main():
         if s >= 4:
             scored.append((s, entry))
 
-    if not scored:
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_keyword_score = scored[0][0] if scored else 0
+
+    # MemPalace fallback: when keyword scoring is weak, try semantic search
+    mempalace_hits = []
+    if best_keyword_score < MEMPALACE_FALLBACK_THRESHOLD:
+        mempalace_hits = mempalace_semantic_search(prompt, limit=2)
+
+    if not scored and not mempalace_hits:
         # Save decayed attention state even if no matches
         save_json(ATTN_STATE, attn_state)
         sys.exit(0)
 
-    scored.sort(key=lambda x: x[0], reverse=True)
     top = scored[:3]
 
     lines = []
@@ -470,6 +546,31 @@ def main():
         if injected:
             output = "\n---\n".join(injected)
             sys.stdout.buffer.write(output.encode("utf-8", errors="replace"))
+            sys.stdout.buffer.write(b"\n")
+
+    # === MemPalace semantic fallback results ===
+    if mempalace_hits:
+        mp_parts = []
+        for similarity, source_file, wing, room, preview in mempalace_hits:
+            # If the source file is a memory .md, read the full file
+            if os.path.exists(source_file) and source_file.endswith(".md"):
+                try:
+                    content = open(source_file, "r", encoding="utf-8").read()
+                    mp_parts.append(
+                        f"[MemPalace: {room} in {wing} (similarity={similarity:.2f})] {source_file}\n{content}"
+                    )
+                except OSError:
+                    mp_parts.append(
+                        f"[MemPalace: {room} in {wing} (similarity={similarity:.2f})] {preview}"
+                    )
+            else:
+                mp_parts.append(
+                    f"[MemPalace: {room} in {wing} (similarity={similarity:.2f})] {preview}"
+                )
+        if mp_parts:
+            mp_output = "\n---\n".join(mp_parts)
+            sys.stdout.buffer.write(b"\n---\n")
+            sys.stdout.buffer.write(mp_output.encode("utf-8", errors="replace"))
             sys.stdout.buffer.write(b"\n")
 
     # === Search stop-hook JSON memories (constraint/decision) ===

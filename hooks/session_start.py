@@ -20,6 +20,11 @@ RECOVERY_FILE = SESSION_DIR / "last_session.md"
 # Max age in seconds before we consider the recovery file stale (1 hour)
 MAX_AGE_SECONDS = 3600
 
+# MemPalace wake-up
+MEMPALACE_DIR = Path.home() / "mempalace"
+MEMPALACE_WAKEUP_CACHE = Path.home() / ".mempalace" / "wakeup_cache.txt"
+MEMPALACE_WAKEUP_MAX_AGE = 3600  # Regenerate wake-up if older than 1 hour
+
 
 def main():
     # Read hook input
@@ -35,38 +40,76 @@ def main():
     if source not in ("startup", "compact"):
         sys.exit(0)
 
-    # Check if recovery file exists
-    if not RECOVERY_FILE.exists():
-        sys.exit(0)
+    # Check if recovery file exists and is recent
+    has_recovery = False
+    if RECOVERY_FILE.exists():
+        try:
+            age = time.time() - RECOVERY_FILE.stat().st_mtime
+            if age <= MAX_AGE_SECONDS:
+                content = RECOVERY_FILE.read_text(encoding="utf-8")
+                if content.strip():
+                    output = f"[Session Recovery] Previous session state recovered:\n\n{content}"
+                    sys.stdout.buffer.write(output.encode("utf-8", errors="replace"))
+                    sys.stdout.buffer.write(b"\n")
+                    has_recovery = True
+        except OSError:
+            pass
 
-    # Check if recovery file is recent enough to be useful
-    try:
-        age = time.time() - RECOVERY_FILE.stat().st_mtime
-    except OSError:
-        sys.exit(0)
-
-    if age > MAX_AGE_SECONDS:
-        sys.exit(0)
-
-    # Read and output the recovery file
-    try:
-        content = RECOVERY_FILE.read_text(encoding="utf-8")
-    except OSError:
-        sys.exit(0)
-
-    if not content.strip():
-        sys.exit(0)
-
-    # Output as additional context for Claude
-    # Plain text to stdout gets injected into Claude's context
-    output = f"[Session Recovery] Previous session state recovered:\n\n{content}"
-    sys.stdout.buffer.write(output.encode("utf-8", errors="replace"))
-    sys.stdout.buffer.write(b"\n")
+    # Inject MemPalace wake-up context (always on startup/compact)
+    _inject_mempalace_wakeup()
 
     # Write active session info for F9 voice daemon
     _write_voice_session_info()
 
     sys.exit(0)
+
+
+def _inject_mempalace_wakeup():
+    """Inject MemPalace wake-up context (identity + L1 essential story).
+
+    Uses a cached version if fresh enough, otherwise regenerates via CLI.
+    ~800-1000 tokens — compact but comprehensive session primer.
+    """
+    try:
+        # Check cache first
+        if MEMPALACE_WAKEUP_CACHE.exists():
+            age = time.time() - MEMPALACE_WAKEUP_CACHE.stat().st_mtime
+            if age <= MEMPALACE_WAKEUP_MAX_AGE:
+                wakeup = MEMPALACE_WAKEUP_CACHE.read_text(encoding="utf-8")
+                if wakeup.strip():
+                    sys.stdout.buffer.write(b"\n[MemPalace Wake-Up]\n")
+                    sys.stdout.buffer.write(wakeup.encode("utf-8", errors="replace"))
+                    sys.stdout.buffer.write(b"\n")
+                    return
+
+        # Generate fresh wake-up via CLI
+        import subprocess
+        result = subprocess.run(
+            ["python", "-m", "mempalace", "wake-up"],
+            capture_output=True, timeout=10,
+            cwd=str(MEMPALACE_DIR),
+        )
+        result.stdout = result.stdout.decode("utf-8", errors="replace")
+        if result.returncode == 0 and result.stdout.strip():
+            # Strip the header line ("Wake-up text (~Nt):\n===...")
+            lines = result.stdout.split("\n")
+            # Find the line after the === separator
+            content_start = 0
+            for i, line in enumerate(lines):
+                if line.startswith("==="):
+                    content_start = i + 1
+                    break
+            wakeup = "\n".join(lines[content_start:]).strip()
+            if wakeup:
+                # Cache it
+                MEMPALACE_WAKEUP_CACHE.parent.mkdir(parents=True, exist_ok=True)
+                MEMPALACE_WAKEUP_CACHE.write_text(wakeup, encoding="utf-8")
+
+                sys.stdout.buffer.write(b"\n[MemPalace Wake-Up]\n")
+                sys.stdout.buffer.write(wakeup.encode("utf-8", errors="replace"))
+                sys.stdout.buffer.write(b"\n")
+    except Exception:
+        pass  # Never block session start
 
 
 def _write_voice_session_info():

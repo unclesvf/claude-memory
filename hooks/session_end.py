@@ -21,7 +21,7 @@ from pathlib import Path
 SESSION_DIR = Path.home() / ".claude" / "sessions"
 FILE_TRACKING = Path.home() / ".claude" / "file_tracking.jsonl"
 MEMORIES_DIR = Path.home() / ".claude" / "memories"
-MEMORY_DIR = Path.home() / ".claude" / "projects" / "C--Users-scott" / "memory"
+MEMORY_DIR = Path.home() / ".claude" / "projects" / "C--Users-yourname" / "memory"
 
 MAX_TRACKING_AGE = 86400  # 24 hours
 

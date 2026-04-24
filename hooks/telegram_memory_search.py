@@ -17,7 +17,7 @@ import sys
 import time
 from pathlib import Path
 
-MEMORY_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects", "C--Users-scott", "memory")
+MEMORY_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects", "C--Users-yourname", "memory")
 MEMORY_INDEX = os.path.join(MEMORY_DIR, "MEMORY.md")
 ACCESS_LOG = os.path.join(os.path.expanduser("~"), ".claude", "memory_access_log.json")
 ATTN_STATE = os.path.join(os.path.expanduser("~"), ".claude", "attn_state.json")

@@ -15,7 +15,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-MEMORY_DIR = Path.home() / ".claude" / "projects" / "C--Users-scott" / "memory"
+MEMORY_DIR = Path.home() / ".claude" / "projects" / "C--Users-yourname" / "memory"
 SESSION_DIR = Path.home() / ".claude" / "sessions"
 RECOVERY_FILE = SESSION_DIR / "last_session.md"
 COMPACTION_LOG = SESSION_DIR / "compaction_log.jsonl"

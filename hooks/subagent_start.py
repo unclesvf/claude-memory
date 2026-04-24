@@ -16,7 +16,7 @@ import os
 import re
 from pathlib import Path
 
-MEMORY_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects", "C--Users-scott", "memory")
+MEMORY_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects", "C--Users-yourname", "memory")
 MEMORY_INDEX = os.path.join(MEMORY_DIR, "MEMORY.md")
 
 
